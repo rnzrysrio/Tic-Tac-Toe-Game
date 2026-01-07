@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<stdbool.h>
+#include<stdlib.h>
 #include<ctype.h>
 
 //Macros for text coloring
@@ -10,64 +11,69 @@
 #define ANSI_COLOR_MAGENTA "\x1b[35m"
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
+#define BOARD_SIZE 3
+#define EMPTY ' '
 
-//Function declarations
+//Optimizations: Function Declarations
 struct player;
+int askTileSelection(struct player current, char boardProgress[BOARD_SIZE][BOARD_SIZE]);
+char selectMarker(int playerId);
 void clearBuffer(void);
 void gameIntroduction(void);
 void gameRunner(void);
-char playerMarkerSelection(int playerNumber);
-void printGameBoard(char gameBoardProgress[3][3], int round);
-void playerTurnChanger(struct player *one, struct player *two, char boardProgress[3][3]);
-bool isTileOccupied(int tileSelection, char boardProgress[3][3]);
-bool isCoordinateValid(int tileSelection);
-bool playerMarkValidator(char xoMarking);
-void boardProgressUpdate(char boardProgress[3][3], int playerSelectedTile, char playerMove);
-bool gameStatus(char gameBoardProgress[3][3], struct player *one, struct player *two, int gameRound);
+void boardInitializer(char board[BOARD_SIZE][BOARD_SIZE]);
+void displayBoard(char boardProgress[BOARD_SIZE][BOARD_SIZE], int round);
+void applyMove(int tileCoordinate, struct player current ,char boardProgress[BOARD_SIZE][BOARD_SIZE]);
+void showPlayerScores(struct player p1, struct player p2);
+bool isTileCoordinateValid(int tileCoordinate);
+bool isTileCoodinateNotOccupied(int tileCoordinate, char boardProgress[BOARD_SIZE][BOARD_SIZE]);
+bool checkWinner(char boardProgress[BOARD_SIZE][BOARD_SIZE], char winningMarker);
+bool checkDraw(char boardProgress[BOARD_SIZE][BOARD_SIZE]);
 
 
+//Optimizations: Function Implementations
 int main() {
-    int menuSelection = 0;
-    bool isSelectionValid = false;
+    int menuSelection;
+    char input[32];
 
-    while (!isSelectionValid) {
+    while (1) {
         gameIntroduction();
         printf(ANSI_COLOR_CYAN "\n[SYSTEM]: SELECT FROM THE OPTION: " ANSI_COLOR_RESET);
 
-        if (scanf("%d", &menuSelection) != 1) {
-            // Clear invalid input
-            clearBuffer();
+        if (!fgets(input, sizeof(input), stdin)) {
+            printf(ANSI_COLOR_RED "\n[SYSTEM]: INPUT ERROR.\n" ANSI_COLOR_RESET);
+            continue;
+        }
 
+        char *endptr;
+        menuSelection = strtol(input, &endptr, 10);
+
+        if (endptr == input || *endptr != '\n') {
             printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! ENTER A NUMBER.\n" ANSI_COLOR_RESET);
             continue;
         }
 
-        if (menuSelection <= 0 || menuSelection > 3) {
+        if (menuSelection < 1 || menuSelection > 3) {
             printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID SELECTION!\n" ANSI_COLOR_RESET);
-        } else {
-            isSelectionValid = true;
+            continue;
         }
+
+        break;
     }
 
-
-    switch (menuSelection)
-    {
+    switch (menuSelection) {
     case 1:
         gameRunner();
         break;
     case 2:
-        printf(ANSI_COLOR_RED "\n[SYSTEM]: FEATURE NOT IMPLEMENTED YET\n" ANSI_COLOR_RESET);
-        break;
-    case 3:
         printf(ANSI_COLOR_RED "\n[SYSTEM]: EXITING\n" ANSI_COLOR_RESET);
-        return 0;
         break;
     
     default:
         printf(ANSI_COLOR_MAGENTA "\n[SYSTEM]: AN UNKNOWN ERROR HAS BEEN DETECTED. EXITING\n" ANSI_COLOR_RESET);
-        return 0;
         break;
     }
+    
     return 0;
 }
 
@@ -83,164 +89,97 @@ void gameIntroduction(void) {
     printf("     |____|   |__|\\___  >   |____|  (____  /\\___  >   |____| \\____/ \\___  >\n");
     printf("                      \\/                 \\/     \\/                      \\/ \n");
 
-    printf(ANSI_COLOR_CYAN "\n[1]: PLAY" ANSI_COLOR_RESET);
-    printf(ANSI_COLOR_CYAN "\n[2]: INSTRUCTION" ANSI_COLOR_RESET);
-    printf(ANSI_COLOR_CYAN "\n[3]: QUIT" ANSI_COLOR_RESET);
+    printf(ANSI_COLOR_CYAN "[1]: PLAY" ANSI_COLOR_RESET);
+    printf(ANSI_COLOR_CYAN "\n[2]: QUIT" ANSI_COLOR_RESET);
 }
 
 //Player base structure
 struct player
 {
-    int playerNumber;
+    int playerId;
     int score;
     char playerMarker;
-    bool isTurn;
 };
 
-
 void gameRunner(void) {
-    //Player Creation and Marking Selection
-    struct player One;
-    One.playerNumber = 1;
-    One.playerMarker = playerMarkerSelection(One.playerNumber);
-    One.isTurn = true;
-    One.score = 0;
-    struct player *ptrOne = &One;
-    
-    struct player Two;
-    Two.playerNumber = 2;
-    Two.playerMarker = (One.playerMarker == 'X') ? 'O' : 'X';
-    Two.isTurn = false;
-    Two.score = 0;
-    struct player *ptrTwo = &Two;
+    struct player One = {1, 0, selectMarker(1)};
+    struct player Two = {2, 0, (One.playerMarker == 'X') ? 'O' : 'X'};
+    struct player *currentPlayer;
 
-    //Game Status
-    int roundCount = 1;
-    bool gameOver = false;
-    bool endGame = false;
-    char boardGame[3][3] = {
-        {' ', ' ', ' '},
-        {' ', ' ', ' '},
-        {' ', ' ', ' '}
-    };
+    int round = 1;
+    char boardState[BOARD_SIZE][BOARD_SIZE];
+    bool playAgain = true;
 
-    while(!gameOver){
-        printGameBoard(boardGame, roundCount);
-        playerTurnChanger(ptrOne, ptrTwo, boardGame);
-        gameOver = gameStatus(boardGame, ptrOne, ptrTwo, roundCount);
-    }
-}
+    //Game loop running as long as players want to play again
+    while(playAgain) {
+        currentPlayer = &One;
+        boardInitializer(boardState);
 
-void playerTurnChanger(struct player *one, struct player *two, char boardProgress[3][3]){
-    int tileSelection;
-    bool isTileSelectionValid = false;
+        //Game ROUND loop running as long as there's no declared winner or game draw 
+        while(true) {
+            int tileSelection;
 
-    if(one->isTurn) {
-        while(!isTileSelectionValid){
-            printf(ANSI_COLOR_YELLOW "\n[PLAYER %d]: Select Tile to Mark: " ANSI_COLOR_RESET, one->playerNumber);
+            displayBoard(boardState, round);
+            tileSelection = askTileSelection(*currentPlayer, boardState);
+            applyMove(tileSelection, *currentPlayer, boardState);
             
-            if(scanf("%d", &tileSelection) != 1) {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! PLEASE ONLY ENTER THE TILE COORDINATE NUMBER\n" ANSI_COLOR_RESET);
-                clearBuffer();
-                continue;
+            if(checkWinner(boardState, currentPlayer->playerMarker)) {
+                printf(ANSI_COLOR_YELLOW "\nA WINNING MATCH HAS BEEN DETECTED!" ANSI_COLOR_RESET);
+                printf(ANSI_COLOR_YELLOW "\nROUND %d WINNER IS PLAYER %d\n" ANSI_COLOR_RESET, round, currentPlayer->playerId);
+                currentPlayer->score++;
+                break;
             }
 
-            if(!isCoordinateValid(tileSelection)) {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! PLEASE ONLY ENTER THE TILE COORDINATE\n" ANSI_COLOR_RESET);
-                clearBuffer();
-                continue;
+            if(checkDraw(boardState)){
+                printf(ANSI_COLOR_YELLOW "\nROUND %d HAS ENDED IN A DRAW!" ANSI_COLOR_RESET, round);
+                break;
             }
 
-            if(!isTileOccupied(tileSelection, boardProgress)){
-                boardProgressUpdate(boardProgress, tileSelection, one->playerMarker);
-                one->isTurn = false;
-                two->isTurn = true;
-                isTileSelectionValid = true;
+            currentPlayer = (currentPlayer == &One) ? &Two : &One;
+        }
+
+        showPlayerScores(One, Two);
+
+        char choice;
+        char finalChoiceOutput;
+
+        while(true) {
+            printf(ANSI_COLOR_CYAN "\nPlay another round? (Y/N): " ANSI_COLOR_RESET);
+            scanf(" %c", &choice);
+
+            finalChoiceOutput = toupper(choice);
+            
+            if(finalChoiceOutput != 'Y' && finalChoiceOutput != 'N') {
+                printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID SELECTION! \'Y\' FOR YES  or \'N\' FOR NO ONLY.\n" ANSI_COLOR_RESET);
+                clearBuffer();
             }
             else {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: TILE IS CURRENTLY OCCUPIED. SELECT OTHER TILE.\n" ANSI_COLOR_RESET);
+                break;
             }
-        }
-    }
-    else {
-        while(!isTileSelectionValid){
-            printf(ANSI_COLOR_YELLOW "\n[PLAYER %d]: Select Tile to Mark: " ANSI_COLOR_RESET, two->playerNumber);
             
-            if(scanf("%d", &tileSelection) != 1) {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! PLEASE ONLY ENTER THE TILE COORDINATE NUMBER\n" ANSI_COLOR_RESET);
-                clearBuffer();
-                continue;
-            }
+        }
+        playAgain = (finalChoiceOutput == 'Y');
+        round++;
+    }
 
-            if(!isCoordinateValid(tileSelection)) {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! PLEASE ONLY ENTER THE TILE COORDINATE\n" ANSI_COLOR_RESET);
-                clearBuffer();
-                continue;
-            }
+    printf(ANSI_COLOR_CYAN "\nTHANK YOU FOR PLAYING!" ANSI_COLOR_RESET);
+    printf(ANSI_COLOR_RED "\n[SYSTEM]: EXITING\n" ANSI_COLOR_RESET);
+}
 
-            if(!isTileOccupied(tileSelection, boardProgress)){
-                boardProgressUpdate(boardProgress, tileSelection, two->playerMarker);
-                one->isTurn = true;
-                two->isTurn = false;
-                isTileSelectionValid = true;
-            }
-            else {
-                printf(ANSI_COLOR_RED "\n[SYSTEM]: TILE IS CURRENTLY OCCUPIED. SELECT OTHER TILE.\n" ANSI_COLOR_RESET);
-            }
+void boardInitializer(char board[BOARD_SIZE][BOARD_SIZE]) {
+    for(unsigned int i = 0; i < BOARD_SIZE; i++) {
+        for(unsigned int j = 0; j < BOARD_SIZE; j++){
+            board[i][j] = EMPTY;
         }
     }
 }
 
-bool isTileOccupied(int tileSelection, char boardProgress[3][3]){
-    int row, column;
-
-    //Computation for getting the row and column coordinates
-    row = (tileSelection / 10) - 1;
-    column = (tileSelection % 10) - 1;
-    bool isOccupied = false;
-    
-    isOccupied = (boardProgress[row][column] != ' ') ? true : false; 
-
-    return isOccupied;
-}
-
-bool isCoordinateValid(int tileSelection) {
-    return (tileSelection == 11 || tileSelection == 12 || tileSelection == 13 ||
-            tileSelection == 21 || tileSelection == 22 || tileSelection == 23 ||
-            tileSelection == 31 || tileSelection == 32 || tileSelection == 33) ? true : false;
-}
-
-char playerMarkerSelection(int playerNumber){
-    char selectedMarker;
-    char upperCase;
-    bool isSelectionValid = false;
-
-    while(!isSelectionValid) {
-        printf(ANSI_COLOR_CYAN "\n[PLAYER %d]: SELECT MARKER (X or O): " ANSI_COLOR_RESET, playerNumber);
-        scanf(" %c", &selectedMarker);
-
-        if(!playerMarkValidator(selectedMarker)){
-            printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID SELECTION!\n" ANSI_COLOR_RESET);
-            continue;
-        }
-        else {
-            isSelectionValid = true;
-        }
-    }
-
-    upperCase = toupper(selectedMarker);
-    
-    printf(ANSI_COLOR_MAGENTA "\n[SYSTEM]: PLAYER %d SELECTED %c\n" ANSI_COLOR_RESET, playerNumber, upperCase);
-
-    return upperCase;
-}
-
-void printGameBoard(char gameBoardProgress[3][3], int round){
+void displayBoard(char boardProgress[BOARD_SIZE][BOARD_SIZE], int round){
     printf(ANSI_COLOR_GREEN "---------------------ROUND %d---------------------\n" ANSI_COLOR_RESET, round);
 
     for(int row = 0; row < 3; row++){
         for(int column = 0; column < 3; column++){
-            printf(ANSI_COLOR_GREEN "|\t%c\t" ANSI_COLOR_RESET, gameBoardProgress[row][column]);
+            printf(ANSI_COLOR_GREEN "|\t%c\t" ANSI_COLOR_RESET, boardProgress[row][column]);
         }
         printf(ANSI_COLOR_GREEN "|" ANSI_COLOR_RESET);
         printf(ANSI_COLOR_GREEN "\n-------------------------------------------------" ANSI_COLOR_RESET);
@@ -248,128 +187,105 @@ void printGameBoard(char gameBoardProgress[3][3], int round){
     }
 }
 
-bool playerMarkValidator(char xoMarking){
-    if(xoMarking == 'x' || xoMarking == 'X' || xoMarking == 'o' || xoMarking == 'O'){
-        return true;
-    }
-    else{
-        return false;
+char selectMarker(int playerId) {
+    char marker;
+
+    do {
+        printf(ANSI_COLOR_CYAN "\n[PLAYER %d] Choose X or O: " ANSI_COLOR_RESET, playerId);
+        scanf(" %c", &marker);
+        marker = toupper(marker);
+
+        if(marker != 'X' && marker != 'O') {
+            printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID SELECTION!\n" ANSI_COLOR_RESET);
+            clearBuffer();
+        }
+    } while(marker != 'X' && marker != 'O');
+
+    printf(ANSI_COLOR_MAGENTA "\n[SYSTEM]: PLAYER %d SELECTED %c\n" ANSI_COLOR_RESET, playerId, marker);
+    
+    return marker;
+}
+
+int askTileSelection(struct player current, char boardProgress[BOARD_SIZE][BOARD_SIZE]) {
+    int selectedTile;
+
+    while(true) {
+        printf(ANSI_COLOR_YELLOW "\n[PLAYER %d]: Select Tile to Mark: " ANSI_COLOR_RESET, current.playerId);
+        
+        if(scanf("%d", &selectedTile) != 1) {
+            printf(ANSI_COLOR_RED "\n[SYSTEM]: INVALID INPUT! PLEASE ONLY ENTER THE TILE COORDINATE NUMBER\n" ANSI_COLOR_RESET);
+            clearBuffer();
+            continue;
+        }
+
+        /*
+        If tile selection is a valid number
+        check if the tile coordinate and tile occupancy is valid 
+        and is possible to apply the move in order to
+        update board progress
+        */
+        if(isTileCoordinateValid(selectedTile) && isTileCoodinateNotOccupied(selectedTile, boardProgress)) {
+            return selectedTile;
+        }
+
+        printf(ANSI_COLOR_RED "\n[SYSTEM]: THE SELECTED TILE COORDINATE IS EITHER NOT A VALID ROW/COLUMN RANGE OR IS OCCUPIED\n" ANSI_COLOR_RESET);
     }
 }
 
-void boardProgressUpdate(char gameBoardProgress[3][3], int playerSelectedTile, char playerMove) {
-    int row, column;
-
-    //Computation for getting the row and column coordinates
-    row = (playerSelectedTile / 10) - 1;
-    column = (playerSelectedTile % 10) - 1;
-
-    gameBoardProgress[row][column] = playerMove;
+bool isTileCoordinateValid(int tileCoordinate) {
+    return (tileCoordinate >= 11 && tileCoordinate <= 33 &&             //This expression tells whether the tile coordinate selection is in the valid tile range
+            tileCoordinate / 10 >= 1 && tileCoordinate / 10 <= 3 &&     //This expression gives the row (x) coordinate and tells whether the result is in the valid row range
+            tileCoordinate % 10 >= 1 && tileCoordinate % 10 <= 3        //This expression gives the column (y) coordinate and tells whether the result is in the valid column range
+            );
 }
 
-bool gameStatus(char gameBoardProgress[3][3], struct player *one, struct player *two, int gameRound) {
-    int i;
-    int victoriousPlayer;
-    char winningMarker;
+bool isTileCoodinateNotOccupied(int tileCoordinate, char boardProgress[BOARD_SIZE][BOARD_SIZE]) {
+    /*
+    The expressions below give the row and column coordinate 
+    via division (remainder truncated) and modulo (remainder) 
+    and correct the coordinates by subtracting the results by 1 to match the zero-based indexing in arrays
+    */
+    int row = (tileCoordinate / 10) - 1;
+    int column = (tileCoordinate % 10) - 1;
 
-    // Check rows
-    for (i = 0; i < 3; i++) {
-        if (gameBoardProgress[i][0] != ' ' &&
-            gameBoardProgress[i][0] == gameBoardProgress[i][1] &&
-            gameBoardProgress[i][1] == gameBoardProgress[i][2]) {
+    return boardProgress[row][column] == EMPTY;
+}
 
-            victoriousPlayer =
-                (gameBoardProgress[i][0] == one->playerMarker)
-                ? one->playerNumber
-                : two->playerNumber;
+void applyMove(int tileCoordinate, struct player current ,char boardProgress[BOARD_SIZE][BOARD_SIZE]) {
+    int row = (tileCoordinate / 10) - 1;
+    int column = (tileCoordinate % 10) - 1;
 
-            winningMarker =
-                (victoriousPlayer == one->playerNumber)
-                ? one->playerMarker
-                : two->playerMarker;
+    boardProgress[row][column] = current.playerMarker;
+}
 
-            printf(ANSI_COLOR_YELLOW
-                   "\n[SYSTEM]: A LINEAR %c HAS BEEN DETECTED\n"
-                   ANSI_COLOR_RESET, winningMarker);
-            printf(ANSI_COLOR_YELLOW
-                   "\n[SYSTEM]: ROUND %d WINNER IS PLAYER %d\n"
-                   ANSI_COLOR_RESET, gameRound, victoriousPlayer);
-            return true;
-        }
+bool checkWinner(char boardProgress[BOARD_SIZE][BOARD_SIZE], char winningMarker) {
+
+    for(int i = 0; i < BOARD_SIZE; i++) {
+        //Check for a winning match horizontally
+        if(boardProgress[i][0] == winningMarker && 
+           boardProgress[i][1] == winningMarker &&
+           boardProgress[i][2] == winningMarker) return true;
+        
+        //Check for a winning match vertically
+        if(boardProgress[0][i] == winningMarker && 
+           boardProgress[1][i] == winningMarker &&
+           boardProgress[2][i] == winningMarker) return true;
     }
 
-    // Check columns
-    for (i = 0; i < 3; i++) {
-        if (gameBoardProgress[0][i] != ' ' &&
-            gameBoardProgress[0][i] == gameBoardProgress[1][i] &&
-            gameBoardProgress[1][i] == gameBoardProgress[2][i]) {
+    //Check for a winning match diagonally
+    return (boardProgress[0][0] == winningMarker && boardProgress[1][1] == winningMarker && boardProgress[2][2] == winningMarker) ||
+           (boardProgress[0][2] == winningMarker && boardProgress[1][1] == winningMarker && boardProgress[2][0] == winningMarker);
+}
 
-            victoriousPlayer =
-                (gameBoardProgress[0][i] == one->playerMarker)
-                ? one->playerNumber
-                : two->playerNumber;
+bool checkDraw(char board[BOARD_SIZE][BOARD_SIZE]) {
+    for (int i = 0; i < BOARD_SIZE; i++)
+        for (int j = 0; j < BOARD_SIZE; j++)
+            if (board[i][j] == EMPTY)
+                return false;
+    return true;
+}
 
-            winningMarker =
-                (victoriousPlayer == one->playerNumber)
-                ? one->playerMarker
-                : two->playerMarker;
-
-            printf(ANSI_COLOR_YELLOW
-                   "\n[SYSTEM]: A LINEAR %c HAS BEEN DETECTED\n"
-                   ANSI_COLOR_RESET, winningMarker);
-            printf(ANSI_COLOR_YELLOW
-                   "\n[SYSTEM]: ROUND %d WINNER IS PLAYER %d\n"
-                   ANSI_COLOR_RESET, gameRound, victoriousPlayer);
-            return true;
-        }
-    }
-
-    // Check diagonals
-    if (gameBoardProgress[0][0] != ' ' &&
-        gameBoardProgress[0][0] == gameBoardProgress[1][1] &&
-        gameBoardProgress[1][1] == gameBoardProgress[2][2]) {
-
-        victoriousPlayer =
-            (gameBoardProgress[0][0] == one->playerMarker)
-            ? one->playerNumber
-            : two->playerNumber;
-
-        winningMarker =
-            (victoriousPlayer == one->playerNumber)
-            ? one->playerMarker
-            : two->playerMarker;
-
-        printf(ANSI_COLOR_YELLOW
-               "\n[SYSTEM]: A LINEAR %c HAS BEEN DETECTED\n"
-               ANSI_COLOR_RESET, winningMarker);
-        printf(ANSI_COLOR_YELLOW
-                "\n[SYSTEM]: ROUND %d WINNER IS PLAYER %d\n"
-                ANSI_COLOR_RESET, gameRound, victoriousPlayer);
-        return true;
-    }
-
-    if (gameBoardProgress[0][2] != ' ' &&
-        gameBoardProgress[0][2] == gameBoardProgress[1][1] &&
-        gameBoardProgress[1][1] == gameBoardProgress[2][0]) {
-
-        victoriousPlayer =
-            (gameBoardProgress[0][2] == one->playerMarker)
-            ? one->playerNumber
-            : two->playerNumber;
-
-        winningMarker =
-            (victoriousPlayer == one->playerNumber)
-            ? one->playerMarker
-            : two->playerMarker;
-
-        printf(ANSI_COLOR_YELLOW
-               "\n[SYSTEM]: A LINEAR %c HAS BEEN DETECTED\n"
-               ANSI_COLOR_RESET, winningMarker);
-        printf(ANSI_COLOR_YELLOW
-                "\n[SYSTEM]: ROUND %d WINNER IS PLAYER %d\n"
-                ANSI_COLOR_RESET, gameRound, victoriousPlayer);
-        return true;
-    }
-
-    return false;
+void showPlayerScores(struct player p1, struct player p2) {
+    printf(ANSI_COLOR_MAGENTA "\n[SYSTEM]: PLAYER %d\'s CURRENT SCORE: %d" ANSI_COLOR_RESET, p1.playerId, p1.score);
+    printf(ANSI_COLOR_MAGENTA "\n[SYSTEM]: PLAYER %d\'s CURRENT SCORE: %d\n" ANSI_COLOR_RESET, p2.playerId, p2.score);
 }
